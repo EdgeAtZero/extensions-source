@@ -2,6 +2,8 @@ plugins {
     id("com.android.library")
     id("org.jetbrains.kotlin.android")
 }
+group = project.extra["group"] as String
+version = project.extra["version.name"] as String
 kotlin {
     compilerOptions {
         jvmTarget = Const.JVM_TARGET

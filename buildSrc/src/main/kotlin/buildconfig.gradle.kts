@@ -1,7 +1,6 @@
 plugins {
     id("com.github.gmazzo.buildconfig")
 }
-
 buildConfig {
     className = "BuildConfig"
     packageName = project.extra["group"] as String

@@ -2,7 +2,6 @@ plugins {
     id("maven-publish")
     id("signing")
 }
-
 afterEvaluate {
     for (publication in publishing.publications.filterIsInstance<MavenPublication>()) {
         publication.artifactId = project.extra["module"] as String
@@ -21,7 +20,6 @@ afterEvaluate {
         }
     }
 }
-
 signing {
     sign(publishing.publications)
 }

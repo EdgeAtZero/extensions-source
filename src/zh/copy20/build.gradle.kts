@@ -8,6 +8,13 @@ plugins {
     alias(buildSrc.plugins.kotlin.serialization)
 }
 android {
+    packaging {
+        resources {
+            excludes += "tc"
+        }
+    }
+}
+android {
     applicationVariants.all {
         val variant = this
         variant.outputs.forEach { output ->

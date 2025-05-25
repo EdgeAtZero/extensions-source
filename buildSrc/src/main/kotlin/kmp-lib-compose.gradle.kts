@@ -3,7 +3,6 @@ plugins {
     id("org.jetbrains.compose")
     id("org.jetbrains.kotlin.plugin.compose")
 }
-
 kotlin {
     sourceSets {
         named("commonMain") {
@@ -13,7 +12,6 @@ kotlin {
         }
     }
 }
-
 compose {
     resources {
         packageOfResClass = project.extra["group"] as String

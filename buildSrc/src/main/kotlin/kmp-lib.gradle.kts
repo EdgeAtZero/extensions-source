@@ -2,10 +2,8 @@ plugins {
     id("com.android.library")
     id("org.jetbrains.kotlin.multiplatform")
 }
-
 group = project.extra["group"] as String
 version = project.extra["version.name"] as String
-
 kotlin {
     androidTarget("android") {
         publishLibraryVariants("release")
@@ -15,7 +13,6 @@ kotlin {
     }
     jvm("desktop")
 }
-
 android {
     namespace = project.extra["group"] as String
     compileSdk = Const.ANDROID_COMPILE_SDK
