@@ -210,7 +210,6 @@ class CopyManga : ConfigurableSource, HttpSource() {
             val url = contents.getJsonObject(i)?.getString("url") ?: return@mapIndexed null
             Page(index = word.jsonPrimitive.int, imageUrl = url)
         }.filterNotNull().sortedBy { it.index }
-
     }
 
     override fun popularMangaRequest(page: Int): Request =
