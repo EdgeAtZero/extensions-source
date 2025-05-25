@@ -1,4 +1,4 @@
-package eu.kanade.tachiyomi.extension.zh.copymanga
+package eu.kanade.tachiyomi.extension.zh.copy20
 
 import android.content.SharedPreferences
 
@@ -13,6 +13,11 @@ sealed class Preference<T>(
         Resolutions[0]
     )
 
+    data object Translate : Preference<Boolean>(
+        "translate",
+        true
+    )
+
     data object UserAgent : Preference<String>(
         "user_agent",
         Constants.DEFAULT_USER_AGENT
@@ -24,6 +29,9 @@ sealed class Preference<T>(
     )
 
 }
+
+fun SharedPreferences.getBoolean(preference: Preference<Boolean>): Boolean =
+    getBoolean(preference.KEY, preference.DEFAULT)!!
 
 fun SharedPreferences.getString(preference: Preference<String>): String =
     getString(preference.KEY, preference.DEFAULT)!!

@@ -5,10 +5,10 @@
             android:name="tachiyomi.extension"/>
     <application
             android:icon="@mipmap/ic_launcher"
-            android:label="Tachiyomi: CopyManga">
+            android:label="Tachiyomi: Copy20">
         <meta-data
                 android:name="tachiyomi.extension.class"
-                android:value=".CopyManga"/>
+                android:value=".Copy20"/>
         <meta-data
                 android:name="tachiyomi.extension.factory"
                 android:value=""/>

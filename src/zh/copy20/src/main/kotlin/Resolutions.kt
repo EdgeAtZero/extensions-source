@@ -1,4 +1,4 @@
-package eu.kanade.tachiyomi.extension.zh.copymanga
+package eu.kanade.tachiyomi.extension.zh.copy20
 
 import okhttp3.internal.toImmutableList
 

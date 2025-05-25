@@ -1,6 +1,6 @@
 @file:OptIn(ExperimentalSerializationApi::class)
 
-package eu.kanade.tachiyomi.extension.zh.copymanga
+package eu.kanade.tachiyomi.extension.zh.copy20
 
 import android.annotation.SuppressLint
 import android.app.Application
@@ -12,12 +12,15 @@ import android.widget.Toast
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
-import com.github.liuyueyi.quick.transfer.ChineseUtils
-import eu.kanade.tachiyomi.extension.zh.copymanga.Constants.CHAPTER_URL_PREFIX
-import eu.kanade.tachiyomi.extension.zh.copymanga.Constants.CHAPTER_URL_PREFIX_2
-import eu.kanade.tachiyomi.extension.zh.copymanga.Constants.MANGA_URL_PREFIX
-import eu.kanade.tachiyomi.extension.zh.copymanga.Constants.MANGA_URL_PREFIX_2
-import eu.kanade.tachiyomi.extension.zh.copymanga.Constants.apiUrl
+import androidx.preference.SwitchPreferenceCompat
+import com.github.liuyueyi.quick.transfer.Trie
+import com.github.liuyueyi.quick.transfer.dictionary.BasicDictionary
+import com.github.liuyueyi.quick.transfer.dictionary.DictionaryFactory
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.CHAPTER_URL_PREFIX
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.CHAPTER_URL_PREFIX_2
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.MANGA_URL_PREFIX
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.MANGA_URL_PREFIX_2
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.apiUrl
 import eu.kanade.tachiyomi.lib.json.getInt
 import eu.kanade.tachiyomi.lib.json.getJsonArray
 import eu.kanade.tachiyomi.lib.json.getJsonObject
@@ -35,24 +38,31 @@ import okhttp3.Response
 import rx.Observable
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.text.SimpleDateFormat
+import java.util.*
 
 
-class CopyManga : ConfigurableSource, HttpSource() {
+class Copy20 : ConfigurableSource, HttpSource() {
     override val lang = "zh"
     override val supportsLatest = true
-    override val name = "拷贝漫画"
+    override val name = "拷貝漫畫"
     override val baseUrl get() = Constants.baseUrl
 
     private val preferences: SharedPreferences
     private var resolution: String
     private var _headers: Headers
+    private var translate: Boolean
+    private val _dictionary by lazy { DictionaryFactory.loadDictionary("assets/t2s.txt", false) }
+    private val __dictionary by lazy { BasicDictionary("", emptyMap(), Trie(), 0) }
+    private val dictionary get() = if (translate) _dictionary else __dictionary
 
     init {
         val application = Injekt.get<Application>()
         @SuppressLint("WrongConstant")
         preferences = application.getSharedPreferences("source_$id", Context.MODE_PRIVATE)
         resolution = preferences.getString(Preference.Resolution)
-        _headers = headersBuilder().add("User-Agent", preferences.getString(Preference.UserAgent)).build()
+        _headers = headersBuilder().build()
+        translate = preferences.getBoolean(Preference.Translate)
         Thread {
             try {
                 val request = GET(url = "${apiUrl}/api/v3/theme/comic/count?limit=500", headers = _headers)
@@ -61,7 +71,8 @@ class CopyManga : ConfigurableSource, HttpSource() {
                     .getJsonObject("results")!!
                     .getJsonArray("list")!!
                     .map {
-                        it.jsonObject.getString("name")!!.let(ChineseUtils::t2s) to it.jsonObject.getString("path_word")!!
+                        it.jsonObject.getString("name")!!
+                            .let(dictionary::convert) to it.jsonObject.getString("path_word")!!
                     }
                     .toTypedArray()
             } catch (_: Exception) {
@@ -90,6 +101,16 @@ class CopyManga : ConfigurableSource, HttpSource() {
         }
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        with(SwitchPreferenceCompat(screen.context)) {
+            key = Preference.Translate.KEY
+            title = "繁体转简体"
+            setDefaultValue(Preference.Translate.DEFAULT)
+            setOnPreferenceChangeListener { _, _ ->
+                translate = preferences.getBoolean(Preference.Translate)
+                true
+            }
+            screen.addPreference(this)
+        }
         with(ListPreference(screen.context)) {
             key = Preference.Resolution.KEY
             title = "图片分辨率 (像素)"
@@ -153,7 +174,7 @@ class CopyManga : ConfigurableSource, HttpSource() {
                         val results = Json.decodeFromStream<JsonObject>(response.body.byteStream())
                             .getJsonObject("results")!!
                         results.getJsonArray("list")!!.forEach {
-                            add(0, JsonUtils.parseChapter(it.jsonObject))
+                            add(0, parseChapter(it.jsonObject))
                             offset++
                         }
                         loop = offset < results.getInt("total")!!
@@ -191,7 +212,7 @@ class CopyManga : ConfigurableSource, HttpSource() {
 
     override fun mangaDetailsParse(response: Response): SManga =
         Json.decodeFromStream<JsonObject>(response.body.byteStream()).getJsonObject("results")!!.let { results ->
-            JsonUtils.parseComicDetail(results.getJsonObject("comic")!!)
+            parseComicDetail(results.getJsonObject("comic")!!)
         }
 
     override fun pageListRequest(chapter: SChapter): Request =
@@ -223,7 +244,7 @@ class CopyManga : ConfigurableSource, HttpSource() {
             MangasPage(
                 mangas = results
                     .getJsonArray("list")!!
-                    .map { JsonUtils.parseComic(it.jsonObject.getJsonObject("comic")!!) },
+                    .map { parseComic(it.jsonObject.getJsonObject("comic")!!) },
                 hasNextPage = results.getInt("offset")!! + results.getInt("limit")!! < results.getInt("total")!!
             )
         }
@@ -340,9 +361,41 @@ class CopyManga : ConfigurableSource, HttpSource() {
             MangasPage(
                 mangas = results
                     .getJsonArray("list")!!
-                    .map { JsonUtils.parseComic(it.jsonObject) },
+                    .map { parseComic(it.jsonObject) },
                 hasNextPage = results.getInt("offset")!! + results.getInt("limit")!! < results.getInt("total")!!
             )
+        }
+
+    private fun parseComic(source: JsonObject): SManga =
+        SManga.create().apply {
+            url = "${MANGA_URL_PREFIX}${source.getString("path_word")}"
+            title = source.getString("name")!!.let(dictionary::convert)
+            author = source.getJsonArray("author")!!
+                .joinToString(separator = ", ") { it.jsonObject.getString("name")!!.let(dictionary::convert) }
+            thumbnail_url = source.getString("cover")
+        }
+
+    private fun parseComicDetail(source: JsonObject): SManga =
+        parseComic(source).apply {
+            description = source.getString("brief")?.let(dictionary::convert)
+            genre = source.getJsonArray("theme")!!
+                .joinToString(separator = ", ") { it.jsonObject.getString("name")!!.let(dictionary::convert) }
+            status = when (source.getJsonObject("status")!!.getInt("value")) {
+                in 1..2 -> SManga.COMPLETED
+                0 -> SManga.ONGOING
+                else -> SManga.UNKNOWN
+            }
+            initialized = true
+        }
+
+    private val date = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
+
+    private fun parseChapter(source: JsonObject): SChapter =
+        SChapter.create().apply {
+            val comic = "${MANGA_URL_PREFIX}${source.getString("comic_path_word")}"
+            url = "${comic}${CHAPTER_URL_PREFIX}${source.getString("uuid")}"
+            name = source.getString("name")!!.let(dictionary::convert)
+            date_upload = source.getString("datetime_created")!!.let { date.parse(it)?.time ?: 0L }
         }
 
 }
