@@ -10,35 +10,7 @@ plugins {
 android {
     packaging {
         resources {
-            excludes += "tc"
-        }
-    }
-}
-android {
-    applicationVariants.all {
-        val variant = this
-        variant.outputs.forEach { output ->
-            val packageTask = variant.packageApplicationProvider.get()
-            packageTask.doLast {
-                val apkFile = output.outputFile
-                val unzipDir = File(layout.buildDirectory.asFile.get(), "tmp/unzipped/${variant.name}")
-                copy {
-                    from(zipTree(apkFile))
-                    into(unzipDir)
-                }
-                apkFile.delete()
-                val tcDir = File(unzipDir, "tc")
-                val assetsDir = File(unzipDir, "assets").apply { mkdirs() }
-                tcDir.resolve("t2s.txt").copyTo(assetsDir.resolve("t2s.txt"), overwrite = true)
-                tcDir.deleteRecursively()
-                ant.withGroovyBuilder {
-                    "zip"(
-                        "destfile" to apkFile.absolutePath,
-                        "basedir" to unzipDir
-                    )
-                }
-                unzipDir.deleteRecursively()
-            }
+            excludes += "tc/**"
         }
     }
 }
