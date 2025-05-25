@@ -1,0 +1,12 @@
+/*
+!/buildSrc
+!/lib
+!/src
+!/.gitignore
+!/build.gradle.kts
+!/gradle.properties
+!/libs.versions.toml
+!/LICENSE
+!/README.md
+!/settings.gradle.kts
+

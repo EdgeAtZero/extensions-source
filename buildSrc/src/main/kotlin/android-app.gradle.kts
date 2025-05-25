@@ -1,0 +1,36 @@
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+kotlin {
+    compilerOptions {
+        jvmTarget = Const.JVM_TARGET
+    }
+}
+android {
+    namespace = project.extra["group"] as String
+    compileSdk = Const.ANDROID_COMPILE_SDK
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+        }
+    }
+    compileOptions {
+        sourceCompatibility = Const.JAVA_VERSION
+        targetCompatibility = Const.JAVA_VERSION
+    }
+    defaultConfig {
+        minSdk = Const.ANDROID_MIN_SDK
+        targetSdk = Const.ANDROID_TARGET_SDK
+        versionCode = project.extra["version.code"] as Int
+        versionName = project.extra["version.name"] as String
+    }
+    if (project.properties["android.signing.store"] != null) {
+        buildTypes["release"].signingConfig = signingConfigs.create("release") {
+            storeFile = file(project.properties["android.signing.store"] as String)
+            storePassword = project.properties["android.signing.store.password"] as String
+            keyAlias = project.properties["android.signing.key.alias"] as String
+            keyPassword = project.properties["android.signing.key.password"] as String
+        }
+    }
+}
