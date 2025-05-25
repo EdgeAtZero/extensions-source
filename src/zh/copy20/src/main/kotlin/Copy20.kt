@@ -13,8 +13,6 @@ import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
-import com.github.liuyueyi.quick.transfer.Trie
-import com.github.liuyueyi.quick.transfer.dictionary.BasicDictionary
 import com.github.liuyueyi.quick.transfer.dictionary.DictionaryFactory
 import eu.kanade.tachiyomi.extension.zh.copy20.Constants.CHAPTER_URL_PREFIX
 import eu.kanade.tachiyomi.extension.zh.copy20.Constants.CHAPTER_URL_PREFIX_2
@@ -52,9 +50,8 @@ class Copy20 : ConfigurableSource, HttpSource() {
     private var resolution: String
     private var _headers: Headers
     private var translate: Boolean
-    private val _dictionary by lazy { DictionaryFactory.loadDictionary("assets/t2s.txt", false) }
-    private val __dictionary by lazy { BasicDictionary("", emptyMap(), Trie(), 0) }
-    private val dictionary get() = if (translate) _dictionary else __dictionary
+    private val dictionary by lazy { DictionaryFactory.loadDictionary("assets/t2s.txt", false) }
+    private val dictionaryTransform: (String) -> String = { if (translate) dictionary.convert(it) else it }
 
     init {
         val application = Injekt.get<Application>()
@@ -72,7 +69,7 @@ class Copy20 : ConfigurableSource, HttpSource() {
                     .getJsonArray("list")!!
                     .map {
                         it.jsonObject.getString("name")!!
-                            .let(dictionary::convert) to it.jsonObject.getString("path_word")!!
+                            .let(dictionaryTransform) to it.jsonObject.getString("path_word")!!
                     }
                     .toTypedArray()
             } catch (_: Exception) {
@@ -369,17 +366,17 @@ class Copy20 : ConfigurableSource, HttpSource() {
     private fun parseComic(source: JsonObject): SManga =
         SManga.create().apply {
             url = "${MANGA_URL_PREFIX}${source.getString("path_word")}"
-            title = source.getString("name")!!.let(dictionary::convert)
+            title = source.getString("name")!!.let(dictionaryTransform)
             author = source.getJsonArray("author")!!
-                .joinToString(separator = ", ") { it.jsonObject.getString("name")!!.let(dictionary::convert) }
+                .joinToString(separator = ", ") { it.jsonObject.getString("name")!!.let(dictionaryTransform) }
             thumbnail_url = source.getString("cover")
         }
 
     private fun parseComicDetail(source: JsonObject): SManga =
         parseComic(source).apply {
-            description = source.getString("brief")?.let(dictionary::convert)
+            description = source.getString("brief")?.let(dictionaryTransform)
             genre = source.getJsonArray("theme")!!
-                .joinToString(separator = ", ") { it.jsonObject.getString("name")!!.let(dictionary::convert) }
+                .joinToString(separator = ", ") { it.jsonObject.getString("name")!!.let(dictionaryTransform) }
             status = when (source.getJsonObject("status")!!.getInt("value")) {
                 in 1..2 -> SManga.COMPLETED
                 0 -> SManga.ONGOING
@@ -394,7 +391,7 @@ class Copy20 : ConfigurableSource, HttpSource() {
         SChapter.create().apply {
             val comic = "${MANGA_URL_PREFIX}${source.getString("comic_path_word")}"
             url = "${comic}${CHAPTER_URL_PREFIX}${source.getString("uuid")}"
-            name = source.getString("name")!!.let(dictionary::convert)
+            name = source.getString("name")!!.let(dictionaryTransform)
             date_upload = source.getString("datetime_created")!!.let { date.parse(it)?.time ?: 0L }
         }
 

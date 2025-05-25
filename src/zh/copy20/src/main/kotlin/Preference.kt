@@ -18,6 +18,11 @@ sealed class Preference<T>(
         true
     )
 
+    data object OnlyDefault : Preference<Boolean>(
+        "translate",
+        true
+    )
+
     data object UserAgent : Preference<String>(
         "user_agent",
         Constants.DEFAULT_USER_AGENT
