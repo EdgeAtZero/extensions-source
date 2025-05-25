@@ -1,6 +1,6 @@
 buildscript {
     extra["group"] = project.name.split("-").let { "eu.kanade.tachiyomi.extension.${it[1]}.${it[2]}" }
-    extra["version.code"] = 1
+    extra["version.code"] = 2
     extra["version.name"] = "1.4.${extra["version.code"]}"
 }
 plugins {
