@@ -19,8 +19,13 @@ sealed class Preference<T>(
     )
 
     data object OnlyDefault : Preference<Boolean>(
-        "translate",
-        true
+        "only_default",
+        false
+    )
+
+    data object OnlyDefaultOppositeList : Preference<String>(
+        "only_default_opposite_list",
+        ""
     )
 
     data object UserAgent : Preference<String>(
@@ -40,3 +45,6 @@ fun SharedPreferences.getBoolean(preference: Preference<Boolean>): Boolean =
 
 fun SharedPreferences.getString(preference: Preference<String>): String =
     getString(preference.KEY, preference.DEFAULT)!!
+
+fun SharedPreferences.getStringSet(preference: Preference<Set<String>>): Set<String> =
+    getStringSet(preference.KEY, preference.DEFAULT)!!
