@@ -50,6 +50,8 @@ class Copy20 : ConfigurableSource, HttpSource() {
     private var resolution: String
     private var _headers: Headers
     private var translate: Boolean
+    private var onlyDefault: Boolean
+    private var onlyDefaultOppositeList: List<String>
     private val dictionary by lazy { DictionaryFactory.loadDictionary("assets/t2s.txt", false) }
     private val dictionaryTransform: (String) -> String = { if (translate) dictionary.convert(it) else it }
 
@@ -60,6 +62,8 @@ class Copy20 : ConfigurableSource, HttpSource() {
         resolution = preferences.getString(Preference.Resolution)
         _headers = headersBuilder().build()
         translate = preferences.getBoolean(Preference.Translate)
+        onlyDefault = preferences.getBoolean(Preference.OnlyDefault)
+        onlyDefaultOppositeList = preferences.getString(Preference.OnlyDefaultOppositeList).trim().lines()
         Thread {
             try {
                 val request = GET(url = "${apiUrl}/api/v3/theme/comic/count?limit=500", headers = _headers)
@@ -141,6 +145,29 @@ class Copy20 : ConfigurableSource, HttpSource() {
             }
             screen.addPreference(this)
         }
+        with(SwitchPreferenceCompat(screen.context)) {
+            key = Preference.OnlyDefault.KEY
+            title = "只保留默认"
+            summary = "漫画章节列表只保留默认，不获取单行本等其他的"
+            setDefaultValue(Preference.OnlyDefault.DEFAULT)
+            setOnPreferenceChangeListener { _, _ ->
+                onlyDefault = preferences.getBoolean(Preference.OnlyDefault)
+                true
+            }
+            screen.addPreference(this)
+        }
+        with(EditTextPreference(screen.context)) {
+            key = Preference.OnlyDefaultOppositeList.KEY
+            title = "只保留默认相反列表"
+            summary =
+                "如果上面的选项开了，这个就是上面的功能的禁用列表，否则就是单独的启用列表（一行一个漫画名称，注意简繁，建议直接复制）"
+            setDefaultValue(Preference.OnlyDefaultOppositeList.DEFAULT)
+            setOnPreferenceChangeListener { _, _ ->
+                onlyDefaultOppositeList = preferences.getString(Preference.OnlyDefaultOppositeList).trim().lines()
+                true
+            }
+            screen.addPreference(this)
+        }
     }
 
     override fun chapterListRequest(manga: SManga): Request =
@@ -152,13 +179,18 @@ class Copy20 : ConfigurableSource, HttpSource() {
     override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> =
         Observable.fromCallable {
             buildList {
-                var response = client.newCall(mangaDetailsRequest(manga)).execute()
-                val groups = Json.decodeFromStream<JsonObject>(response.body.byteStream())
-                    .getJsonObject("results")!!
-                    .let { results ->
-                        results.getJsonObject("groups")!!
-                            .map { it.value.jsonObject.getString("path_word") }
-                    }
+                val isContained = onlyDefaultOppositeList.contains(manga.title)
+                val groups = if (onlyDefault && !isContained || !onlyDefault && isContained) {
+                    listOf("default")
+                } else {
+                    val response = client.newCall(mangaDetailsRequest(manga)).execute()
+                    Json.decodeFromStream<JsonObject>(response.body.byteStream())
+                        .getJsonObject("results")!!
+                        .let { results ->
+                            results.getJsonObject("groups")!!
+                                .map { it.value.jsonObject.getString("path_word") }
+                        }
+                }
                 for (group in groups) {
                     var offset = 0
                     var loop = true
@@ -167,7 +199,7 @@ class Copy20 : ConfigurableSource, HttpSource() {
                             url = "${apiUrl}/api/v3${manga.url}/group/${group}/chapters?limit=500&offset=${offset}",
                             headers = _headers
                         )
-                        response = client.newCall(request).execute()
+                        val response = client.newCall(request).execute()
                         val results = Json.decodeFromStream<JsonObject>(response.body.byteStream())
                             .getJsonObject("results")!!
                         results.getJsonArray("list")!!.forEach {
