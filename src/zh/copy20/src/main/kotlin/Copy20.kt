@@ -359,7 +359,6 @@ class Copy20 : ConfigurableSource, HttpSource() {
             query.isNotBlank() -> {
                 addEncodedPathSegments("api/v3/search/comic")
                 addQueryParameter("limit", "30")
-                addQueryParameter("offset", ((page - 1) * 30).toString())
                 addQueryParameter("q", query)
                 addQueryParameter("q_type", searchFilter[search].second)
             }
@@ -382,6 +381,7 @@ class Copy20 : ConfigurableSource, HttpSource() {
                 addQueryParameter("theme", genreFilter[genre].second)
             }
         }
+        addQueryParameter("offset", ((page - 1) * 30).toString())
         GET(url = build(), headers = _headers)
     }
 
