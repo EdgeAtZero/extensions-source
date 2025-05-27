@@ -16,7 +16,7 @@ android {
 }
 dependencies {
     implementation(project(":lib-json"))
-    implementation(libs.transformChinese)
+    implementation(project(":lib-t2s"))
 
     compileOnly(libs.kotlin.stdlib)
     compileOnly(libs.kotlin.reflect)
