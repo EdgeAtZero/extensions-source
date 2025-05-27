@@ -18,9 +18,7 @@ import eu.kanade.tachiyomi.extension.zh.copy20.Constants.CHAPTER_URL_PREFIX_2
 import eu.kanade.tachiyomi.extension.zh.copy20.Constants.MANGA_URL_PREFIX
 import eu.kanade.tachiyomi.extension.zh.copy20.Constants.MANGA_URL_PREFIX_2
 import eu.kanade.tachiyomi.extension.zh.copy20.Constants.apiUrl
-import eu.kanade.tachiyomi.lib.json.getInt
-import eu.kanade.tachiyomi.lib.json.getJsonArray
-import eu.kanade.tachiyomi.lib.json.getJsonObject
+import eu.kanade.tachiyomi.lib.json.buildJsonParsing
 import eu.kanade.tachiyomi.lib.json.getString
 import eu.kanade.tachiyomi.lib.t2s.T2S
 import eu.kanade.tachiyomi.network.GET
@@ -67,14 +65,13 @@ class Copy20 : ConfigurableSource, HttpSource() {
             try {
                 val request = GET(url = "${apiUrl}/api/v3/theme/comic/count?limit=500", headers = _headers)
                 val response = client.newCall(request).execute()
-                genreFilter = Json.decodeFromStream<JsonObject>(response.body.byteStream())
-                    .getJsonObject("results")!!
-                    .getJsonArray("list")!!
-                    .map {
-                        it.jsonObject.getString("name")!!
-                            .let(t2sTransform) to it.jsonObject.getString("path_word")!!
-                    }
-                    .toTypedArray()
+                genreFilter = buildJsonParsing {
+                    Json.decodeFromStream<JsonObject>(response.body.byteStream())
+                        .jsonObject("results")
+                        .jsonArray("list")
+                        .map { it.jsonObject.string("name").let(t2sTransform) to it.jsonObject.string("path_word") }
+                        .toTypedArray()
+                }
             } catch (_: Exception) {
                 Handler(Looper.getMainLooper()).post {
                     Toast.makeText(application, "$name: 刷新题材失败", Toast.LENGTH_SHORT)
@@ -86,7 +83,7 @@ class Copy20 : ConfigurableSource, HttpSource() {
 
     override fun imageRequest(page: Page): Request =
         GET(
-            url = Constants.RESOLUTION_REGEX.replaceFirst(page.imageUrl!!, resolution),
+            url = Constants.RESOLUTION_REGEX.replaceFirst(requireNotNull(page.imageUrl), resolution),
             headers = _headers
         )
 
@@ -183,12 +180,12 @@ class Copy20 : ConfigurableSource, HttpSource() {
                     listOf("default")
                 } else {
                     val response = client.newCall(mangaDetailsRequest(manga)).execute()
-                    Json.decodeFromStream<JsonObject>(response.body.byteStream())
-                        .getJsonObject("results")!!
-                        .let { results ->
-                            results.getJsonObject("groups")!!
-                                .map { it.value.jsonObject.getString("path_word") }
-                        }
+                    buildJsonParsing {
+                        Json.decodeFromStream<JsonObject>(response.body.byteStream())
+                            .jsonObject("results")
+                            .jsonObject("groups")
+                            .map { it.value.jsonObject.string("path_word") }
+                    }
                 }
                 for (group in groups) {
                     var offset = 0
@@ -199,13 +196,15 @@ class Copy20 : ConfigurableSource, HttpSource() {
                             headers = _headers
                         )
                         val response = client.newCall(request).execute()
-                        val results = Json.decodeFromStream<JsonObject>(response.body.byteStream())
-                            .getJsonObject("results")!!
-                        results.getJsonArray("list")!!.forEach {
-                            add(0, parseChapter(it.jsonObject))
-                            offset++
+                        buildJsonParsing {
+                            val results = Json.decodeFromStream<JsonObject>(response.body.byteStream())
+                                .jsonObject("results")
+                            results.jsonArray("list").forEach {
+                                add(0, parseChapter(it.jsonObject))
+                                offset++
+                            }
+                            loop = offset < results.int("total")
                         }
-                        loop = offset < results.getInt("total")!!
                     }
                 }
             }
@@ -238,10 +237,11 @@ class Copy20 : ConfigurableSource, HttpSource() {
     override fun getChapterUrl(chapter: SChapter): String =
         "${Constants.baseUrl}${chapter.url}"
 
-    override fun mangaDetailsParse(response: Response): SManga =
-        Json.decodeFromStream<JsonObject>(response.body.byteStream()).getJsonObject("results")!!.let { results ->
-            parseComicDetail(results.getJsonObject("comic")!!)
-        }
+    override fun mangaDetailsParse(response: Response): SManga = buildJsonParsing {
+        Json.decodeFromStream<JsonObject>(response.body.byteStream())
+            .jsonObject("results")
+            .let { parseComicDetail(it.jsonObject("comic")) }
+    }
 
     override fun pageListRequest(chapter: SChapter): Request =
         GET(
@@ -249,16 +249,14 @@ class Copy20 : ConfigurableSource, HttpSource() {
             headers = _headers
         )
 
-    override fun pageListParse(response: Response): List<Page> {
-        val results = Json.decodeFromStream<JsonObject>(response.body.byteStream())
-            .getJsonObject("results")!!
-        val chapter = results.getJsonObject("chapter")!!
-        val words = chapter.getJsonArray("words")!!
-        val contents = chapter.getJsonArray("contents")!!
-        return words.mapIndexed { i, word ->
-            val url = contents.getJsonObject(i)?.getString("url") ?: return@mapIndexed null
-            Page(index = word.jsonPrimitive.int, imageUrl = url)
-        }.filterNotNull().sortedBy { it.index }
+    override fun pageListParse(response: Response): List<Page> = buildJsonParsing {
+        val chapter = Json.decodeFromStream<JsonObject>(response.body.byteStream())
+            .jsonObject("results")
+            .jsonObject("chapter")
+        val contents = chapter.jsonArray("contents")
+        chapter.jsonArray("words")
+            .mapIndexed { i, t -> Page(index = t.jsonPrimitive.int, imageUrl = contents.jsonObject(i).string("url")) }
+            .sortedBy { it.index }
     }
 
     override fun popularMangaRequest(page: Int): Request =
@@ -267,15 +265,14 @@ class Copy20 : ConfigurableSource, HttpSource() {
             headers = _headers
         )
 
-    override fun popularMangaParse(response: Response): MangasPage =
-        Json.decodeFromStream<JsonObject>(response.body.byteStream()).getJsonObject("results")!!.let { results ->
-            MangasPage(
-                mangas = results
-                    .getJsonArray("list")!!
-                    .map { parseComic(it.jsonObject.getJsonObject("comic")!!) },
-                hasNextPage = results.getInt("offset")!! + results.getInt("limit")!! < results.getInt("total")!!
-            )
-        }
+    override fun popularMangaParse(response: Response): MangasPage = buildJsonParsing {
+        val results = Json.decodeFromStream<JsonObject>(response.body.byteStream())
+            .jsonObject("results")
+        MangasPage(
+            mangas = results.jsonArray("list").map { parseComic(it.jsonObject.jsonObject("comic")) },
+            hasNextPage = results.int("offset") + results.int("limit") < results.int("total")
+        )
+    }
 
     private val searchFilter = arrayOf(
         "全部" to "",
@@ -357,7 +354,6 @@ class Copy20 : ConfigurableSource, HttpSource() {
         when {
             query.isNotBlank() -> {
                 addEncodedPathSegments("api/v3/search/comic")
-                addQueryParameter("limit", "30")
                 addQueryParameter("q", query)
                 addQueryParameter("q_type", searchFilter[search].second)
             }
@@ -380,50 +376,50 @@ class Copy20 : ConfigurableSource, HttpSource() {
                 addQueryParameter("theme", genreFilter[genre].second)
             }
         }
+        addQueryParameter("limit", "30")
         addQueryParameter("offset", ((page - 1) * 30).toString())
         GET(url = build(), headers = _headers)
     }
 
-    override fun searchMangaParse(response: Response): MangasPage =
-        Json.decodeFromStream<JsonObject>(response.body.byteStream()).getJsonObject("results")!!.let { results ->
-            MangasPage(
-                mangas = results
-                    .getJsonArray("list")!!
-                    .map { parseComic(it.jsonObject) },
-                hasNextPage = results.getInt("offset")!! + results.getInt("limit")!! < results.getInt("total")!!
-            )
-        }
+    override fun searchMangaParse(response: Response): MangasPage = buildJsonParsing {
+        val results = Json.decodeFromStream<JsonObject>(response.body.byteStream()).jsonObject("results")
+        MangasPage(
+            mangas = results.jsonArray("list").map { parseComic(it.jsonObject) },
+            hasNextPage = results.int("offset") + results.int("limit") < results.int("total")
+        )
+    }
 
-    private fun parseComic(source: JsonObject): SManga =
+    private fun parseComic(source: JsonObject): SManga = buildJsonParsing {
         SManga.create().apply {
             url = "${MANGA_URL_PREFIX}${source.getString("path_word")}"
-            title = source.getString("name")!!.let(t2sTransform)
-            author = source.getJsonArray("author")!!
-                .joinToString(separator = ", ") { it.jsonObject.getString("name")!!.let(t2sTransform) }
-            thumbnail_url = source.getString("cover")
+            title = source.string("name").let(t2sTransform)
+            author = source.jsonArray("author").joinToString { it.jsonObject.string("name").let(t2sTransform) }
+            thumbnail_url = source.string("cover")
         }
+    }
 
-    private fun parseComicDetail(source: JsonObject): SManga =
+    private fun parseComicDetail(source: JsonObject): SManga = buildJsonParsing {
         parseComic(source).apply {
-            description = source.getString("brief")?.let(t2sTransform)
-            genre = source.getJsonArray("theme")!!
-                .joinToString(separator = ", ") { it.jsonObject.getString("name")!!.let(t2sTransform) }
-            status = when (source.getJsonObject("status")!!.getInt("value")) {
+            description = source.string("brief").let(t2sTransform)
+            genre = source.jsonArray("theme").joinToString { it.jsonObject.string("name").let(t2sTransform) }
+            status = when (source.jsonObject("status").int("value")) {
                 in 1..2 -> SManga.COMPLETED
                 0 -> SManga.ONGOING
                 else -> SManga.UNKNOWN
             }
             initialized = true
         }
+    }
 
     private val date = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
 
-    private fun parseChapter(source: JsonObject): SChapter =
+    private fun parseChapter(source: JsonObject): SChapter = buildJsonParsing {
         SChapter.create().apply {
             val comic = "${MANGA_URL_PREFIX}${source.getString("comic_path_word")}"
             url = "${comic}${CHAPTER_URL_PREFIX}${source.getString("uuid")}"
-            name = source.getString("name")!!.let(t2sTransform)
-            date_upload = source.getString("datetime_created")!!.let { date.parse(it)?.time ?: 0L }
+            name = source.string("name").let(t2sTransform)
+            date_upload = source.string("datetime_created").let { date.parse(it)?.time ?: 0L }
         }
+    }
 
 }
