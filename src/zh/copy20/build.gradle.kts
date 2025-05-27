@@ -1,6 +1,6 @@
 buildscript {
-    extra["group"] = project.name.split("-").let { "eu.kanade.tachiyomi.extension.${it[1]}.${it[2]}" }
-    extra["version.code"] = 3
+    extra["group"] = project.name.split("-").let { "${rootProject.group}.extension.${it[1]}.${it[2]}" }
+    extra["version.code"] = Const.Git.commit(project.projectDir.absolutePath)
     extra["version.name"] = "1.4.${extra["version.code"]}"
 }
 plugins {

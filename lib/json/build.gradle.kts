@@ -1,5 +1,5 @@
 buildscript {
-    extra["group"] = project.name.split("-").let { "eu.kanade.tachiyomi.lib.${it[1]}" }
+    extra["group"] = project.name.split("-").let { "${rootProject.group}.lib.${it[1]}" }
     extra["version.name"] = project.version.toString()
 }
 plugins {

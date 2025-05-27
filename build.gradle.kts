@@ -1,8 +1,9 @@
 @file:Suppress("UnstableApiUsage")
 
 buildscript {
-    extra["group"] = "me.edgeatzero.ext"
+    extra["group"] = "eu.kanade.tachiyomi"
 }
+group = extra["group"] as String
 allprojects {
     repositories {
         google {

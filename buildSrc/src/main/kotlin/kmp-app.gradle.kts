@@ -7,27 +7,27 @@ version = project.extra["version.name"] as String
 kotlin {
     androidTarget("android") {
         compilerOptions {
-            jvmTarget = Const.JVM_TARGET
+            jvmTarget = Const.Java.TARGET
         }
     }
     jvm("desktop")
 }
 android {
     namespace = project.extra["group"] as String
-    compileSdk = Const.ANDROID_COMPILE_SDK
+    compileSdk = Const.Android.Sdk.COMPILE
     buildTypes {
         release {
             isMinifyEnabled = false
         }
     }
     compileOptions {
-        sourceCompatibility = Const.JAVA_VERSION
-        targetCompatibility = Const.JAVA_VERSION
+        sourceCompatibility = Const.Java.VERSION
+        targetCompatibility = Const.Java.VERSION
     }
     defaultConfig {
-        minSdk = Const.ANDROID_MIN_SDK
-        minSdk = Const.ANDROID_MIN_SDK
-        targetSdk = Const.ANDROID_TARGET_SDK
+        minSdk = Const.Android.Sdk.MIN
+        minSdk = Const.Android.Sdk.MIN
+        targetSdk = Const.Android.Sdk.TARGET
         versionCode = project.extra["version.code"] as Int
         versionName = project.extra["version.name"] as String
     }

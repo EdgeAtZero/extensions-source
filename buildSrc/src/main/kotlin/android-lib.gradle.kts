@@ -6,17 +6,17 @@ group = project.extra["group"] as String
 version = project.extra["version.name"] as String
 kotlin {
     compilerOptions {
-        jvmTarget = Const.JVM_TARGET
+        jvmTarget = Const.Java.TARGET
     }
 }
 android {
     namespace = project.extra["group"] as String
-    compileSdk = Const.ANDROID_COMPILE_SDK
+    compileSdk = Const.Android.Sdk.COMPILE
     compileOptions {
-        sourceCompatibility = Const.JAVA_VERSION
-        targetCompatibility = Const.JAVA_VERSION
+        sourceCompatibility = Const.Java.VERSION
+        targetCompatibility = Const.Java.VERSION
     }
     defaultConfig {
-        minSdk = Const.ANDROID_MIN_SDK
+        minSdk = Const.Android.Sdk.MIN
     }
 }
