@@ -1,6 +1,3 @@
-import kotlin.io.path.listDirectoryEntries
-import kotlin.io.path.name
-
 rootProject.name = "extensions-source"
 dependencyResolutionManagement {
     versionCatalogs {
@@ -12,21 +9,21 @@ dependencyResolutionManagement {
         }
     }
 }
-rootDir.toPath()
+rootDir
     .resolve("lib")
-    .listDirectoryEntries()
+    .listFiles { it: File -> it.isDirectory }
     .forEach { lib ->
         val name = ":lib-${lib.name}"
         include(name)
-        project(name).projectDir = lib.toFile()
+        project(name).projectDir = lib
     }
-rootDir.toPath()
+rootDir
     .resolve("src")
-    .listDirectoryEntries()
+    .listFiles { it: File -> it.isDirectory }
     .forEach { lang ->
-        lang.listDirectoryEntries().forEach { ext ->
+        lang.listFiles { it: File -> it.isDirectory }.forEach { ext ->
             val name = ":ext-${lang.name}-${ext.name}"
             include(name)
-            project(name).projectDir = ext.toFile()
+            project(name).projectDir = ext
         }
     }
