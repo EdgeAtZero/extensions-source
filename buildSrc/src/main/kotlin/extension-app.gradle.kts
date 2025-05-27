@@ -3,7 +3,7 @@ plugins {
 }
 android {
     base {
-        archivesName = "${extra["group"]}-${extra["version.name"]}"
+        archivesName = extra["group"] as String
     }
     defaultConfig {
         manifestPlaceholders += mapOf(
