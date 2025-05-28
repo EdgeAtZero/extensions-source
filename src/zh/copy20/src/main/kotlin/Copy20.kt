@@ -6,11 +6,9 @@ import android.annotation.SuppressLint
 import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
-import android.os.Handler
-import android.os.Looper
-import android.widget.Toast
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
+import androidx.preference.Preference.OnPreferenceChangeListener
 import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
 import eu.kanade.tachiyomi.extension.zh.copy20.Constants.CHAPTER_URL_PREFIX
@@ -36,6 +34,7 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.properties.Delegates
 
 
 class Copy20 : ConfigurableSource, HttpSource() {
@@ -45,67 +44,71 @@ class Copy20 : ConfigurableSource, HttpSource() {
     override val baseUrl get() = Constants.baseUrl
 
     private val preferences: SharedPreferences
-    private var resolution: String
-    private var _headers: Headers
-    private var translate: Boolean
-    private var onlyDefault: Boolean
-    private var onlyDefaultOppositeList: List<String>
+    private var resolution by Delegates.notNull<String>()
+    private var translate by Delegates.notNull<Boolean>()
+    private var onlyDefault by Delegates.notNull<Boolean>()
+    private var apiHeaders by Delegates.notNull<Headers>()
+    private val onlyDefaultOppositeList = mutableListOf<String>()
     private val t2sTransform: (String) -> String = { if (translate) T2S.convert(it) else it }
+
+    private var isRefreshGenreFailed = false
 
     init {
         val application = Injekt.get<Application>()
         @SuppressLint("WrongConstant")
         preferences = application.getSharedPreferences("source_$id", Context.MODE_PRIVATE)
+        updatePreferences()
+        Thread(::updateGenres).start()
+    }
+
+    private fun updatePreferences() {
         resolution = preferences.getString(Preference.Resolution)
-        _headers = headersBuilder().build()
         translate = preferences.getBoolean(Preference.Translate)
         onlyDefault = preferences.getBoolean(Preference.OnlyDefault)
-        onlyDefaultOppositeList = preferences.getString(Preference.OnlyDefaultOppositeList).trim().lines()
-        Thread {
-            try {
-                val request = GET(url = "${apiUrl}/api/v3/theme/comic/count?limit=500", headers = _headers)
-                val response = client.newCall(request).execute()
-                genreFilter = buildJsonParsing {
-                    Json.decodeFromStream<JsonObject>(response.body.byteStream())
-                        .jsonObject("results")
-                        .jsonArray("list")
-                        .map { it.jsonObject.string("name").let(t2sTransform) to it.jsonObject.string("path_word") }
-                        .toTypedArray()
-                }
-            } catch (_: Exception) {
-                Handler(Looper.getMainLooper()).post {
-                    Toast.makeText(application, "$name: 刷新题材失败", Toast.LENGTH_SHORT)
-                        .show()
-                }
+        onlyDefaultOppositeList.clear()
+        onlyDefaultOppositeList += preferences.getString(Preference.OnlyDefaultOppositeList).trim().lines()
+        apiHeaders = with(Headers.Builder()) {
+            add("Accept", "application/json")
+            add("Cookie", preferences.getString(Preference.Cookies))
+            add("User-Agent", preferences.getString(Preference.UserAgent))
+            build()
+        }
+    }
+
+    private fun updateGenres() {
+        try {
+            val request = GET(url = "${apiUrl}/api/v3/theme/comic/count?limit=500", headers = apiHeaders)
+            val response = client.newCall(request).execute()
+            genreFilter = buildJsonParsing {
+                val init = mutableListOf("全部" to "")
+                Json.decodeFromStream<JsonObject>(response.body.byteStream())
+                    .jsonObject("results")
+                    .jsonArray("list")
+                    .mapTo(init) { it.jsonObject.string("name").let(t2sTransform) to it.jsonObject.string("path_word") }
+                    .toTypedArray()
             }
-        }.start()
+            isRefreshGenreFailed = false
+        } catch (_: Exception) {
+            isRefreshGenreFailed = true
+        }
     }
 
     override fun imageRequest(page: Page): Request =
         GET(
             url = Constants.RESOLUTION_REGEX.replaceFirst(requireNotNull(page.imageUrl), resolution),
-            headers = _headers
+            headers = apiHeaders
         )
 
-    override fun headersBuilder(): Headers.Builder =
-        with(Headers.Builder()) {
-            add("Accept", "application/json")
-            add("Cookie", preferences.getString(Preference.Cookies))
-            add("User-Agent", preferences.getString(Preference.UserAgent))
-            add("platform", "1")
-            add("webp", "1")
-            add("region", "0")
-        }
-
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        val updateListener = OnPreferenceChangeListener { _, _ ->
+            updatePreferences()
+            true
+        }
         with(SwitchPreferenceCompat(screen.context)) {
             key = Preference.Translate.KEY
             title = "繁体转简体"
             setDefaultValue(Preference.Translate.DEFAULT)
-            setOnPreferenceChangeListener { _, _ ->
-                translate = preferences.getBoolean(Preference.Translate)
-                true
-            }
+            setOnPreferenceChangeListener(updateListener)
             screen.addPreference(this)
         }
         with(ListPreference(screen.context)) {
@@ -115,30 +118,21 @@ class Copy20 : ConfigurableSource, HttpSource() {
             entries = Resolutions.toTypedArray()
             entryValues = entries
             setDefaultValue(Preference.Resolution.DEFAULT)
-            setOnPreferenceChangeListener { _, _ ->
-                resolution = preferences.getString(Preference.Resolution)
-                true
-            }
+            setOnPreferenceChangeListener(updateListener)
             screen.addPreference(this)
         }
         with(EditTextPreference(screen.context)) {
             key = Preference.UserAgent.KEY
             title = "UserAgent（需要非手机版的）"
             setDefaultValue(Preference.UserAgent.DEFAULT)
-            setOnPreferenceChangeListener { _, _ ->
-                _headers = headersBuilder().build()
-                true
-            }
+            setOnPreferenceChangeListener(updateListener)
             screen.addPreference(this)
         }
         with(EditTextPreference(screen.context)) {
             key = Preference.Cookies.KEY
             title = "Cookies"
             setDefaultValue(Preference.Cookies.DEFAULT)
-            setOnPreferenceChangeListener { _, _ ->
-                _headers = headersBuilder().build()
-                true
-            }
+            setOnPreferenceChangeListener(updateListener)
             screen.addPreference(this)
         }
         with(SwitchPreferenceCompat(screen.context)) {
@@ -146,10 +140,7 @@ class Copy20 : ConfigurableSource, HttpSource() {
             title = "只保留默认"
             summary = "漫画章节列表只保留默认，不获取单行本等其他的"
             setDefaultValue(Preference.OnlyDefault.DEFAULT)
-            setOnPreferenceChangeListener { _, _ ->
-                onlyDefault = preferences.getBoolean(Preference.OnlyDefault)
-                true
-            }
+            setOnPreferenceChangeListener(updateListener)
             screen.addPreference(this)
         }
         with(EditTextPreference(screen.context)) {
@@ -158,10 +149,7 @@ class Copy20 : ConfigurableSource, HttpSource() {
             summary =
                 "如果上面的选项开了，这个就是上面的功能的禁用列表，否则就是单独的启用列表（一行一个漫画名称，注意简繁，建议直接复制）"
             setDefaultValue(Preference.OnlyDefaultOppositeList.DEFAULT)
-            setOnPreferenceChangeListener { _, _ ->
-                onlyDefaultOppositeList = preferences.getString(Preference.OnlyDefaultOppositeList).trim().lines()
-                true
-            }
+            setOnPreferenceChangeListener(updateListener)
             screen.addPreference(this)
         }
     }
@@ -193,7 +181,7 @@ class Copy20 : ConfigurableSource, HttpSource() {
                     while (loop) {
                         val request = GET(
                             url = "${apiUrl}/api/v3${manga.url}/group/${group}/chapters?limit=500&offset=${offset}",
-                            headers = _headers
+                            headers = apiHeaders
                         )
                         val response = client.newCall(request).execute()
                         buildJsonParsing {
@@ -219,7 +207,7 @@ class Copy20 : ConfigurableSource, HttpSource() {
     override fun latestUpdatesRequest(page: Int): Request =
         GET(
             url = "${apiUrl}/api/v3/update/newest?limit=30&offset=${(page - 1) * 30}",
-            headers = _headers
+            headers = apiHeaders
         )
 
     override fun latestUpdatesParse(response: Response): MangasPage =
@@ -228,7 +216,7 @@ class Copy20 : ConfigurableSource, HttpSource() {
     override fun mangaDetailsRequest(manga: SManga): Request =
         GET(
             url = "${apiUrl}/api/v3${manga.url.replace(MANGA_URL_PREFIX, MANGA_URL_PREFIX_2)}",
-            headers = _headers
+            headers = apiHeaders
         )
 
     override fun getMangaUrl(manga: SManga): String =
@@ -246,7 +234,7 @@ class Copy20 : ConfigurableSource, HttpSource() {
     override fun pageListRequest(chapter: SChapter): Request =
         GET(
             url = "${apiUrl}/api/v3${chapter.url.replace(CHAPTER_URL_PREFIX, CHAPTER_URL_PREFIX_2)}",
-            headers = _headers
+            headers = apiHeaders
         )
 
     override fun pageListParse(response: Response): List<Page> = buildJsonParsing {
@@ -262,7 +250,7 @@ class Copy20 : ConfigurableSource, HttpSource() {
     override fun popularMangaRequest(page: Int): Request =
         GET(
             url = "${apiUrl}/api/v3/recs?pos=3200102&limit=30&offset=${(page - 1) * 30}",
-            headers = _headers
+            headers = apiHeaders
         )
 
     override fun popularMangaParse(response: Response): MangasPage = buildJsonParsing {
@@ -339,8 +327,13 @@ class Copy20 : ConfigurableSource, HttpSource() {
             SortFilter(),
             RegionFilter()
         ).apply {
-            ::genreFilter.isInitialized || return@apply
-            add(GenreFilter())
+            if (isRefreshGenreFailed) {
+                add(Filter.Header("获取题材失败了，已在后台重新加载"))
+                Thread(::updateGenres).start()
+            } else {
+                ::genreFilter.isInitialized || return@apply
+                add(GenreFilter())
+            }
         }.let(::FilterList)
     }
 
@@ -378,7 +371,7 @@ class Copy20 : ConfigurableSource, HttpSource() {
         }
         addQueryParameter("limit", "30")
         addQueryParameter("offset", ((page - 1) * 30).toString())
-        GET(url = build(), headers = _headers)
+        GET(url = build(), headers = apiHeaders)
     }
 
     override fun searchMangaParse(response: Response): MangasPage = buildJsonParsing {
