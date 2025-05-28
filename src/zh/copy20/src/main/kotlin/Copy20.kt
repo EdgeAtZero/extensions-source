@@ -360,13 +360,19 @@ class Copy20 : ConfigurableSource, HttpSource() {
             else -> {
                 addEncodedPathSegments("api/v3/comics")
                 val sort = filters.filterIsInstance<SortFilter>().first().state
-                val region = filters.filterIsInstance<RegionFilter>().first().state
-                val genre = filters.filterIsInstance<GenreFilter>().first().state
                 if (sort != null) {
                     addQueryParameter("ordering", "${if (!sort.ascending) "-" else ""}${sortFilter[sort.index].second}")
                 }
-                addQueryParameter("top", regionFilter[region].second)
-                addQueryParameter("theme", genreFilter[genre].second)
+                val region = filters.filterIsInstance<RegionFilter>().first().state
+                if (region > 0) {
+                    addQueryParameter("top", regionFilter[region].second)
+                }
+                if (::genreFilter.isInitialized) {
+                    val genre = filters.filterIsInstance<GenreFilter>().first().state
+                    if (genre > 0) {
+                        addQueryParameter("theme", genreFilter[genre].second)
+                    }
+                }
             }
         }
         addQueryParameter("limit", "30")
