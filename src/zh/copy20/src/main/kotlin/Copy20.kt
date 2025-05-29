@@ -17,6 +17,7 @@ import eu.kanade.tachiyomi.extension.zh.copy20.Constants.MANGA_URL_PREFIX
 import eu.kanade.tachiyomi.extension.zh.copy20.Constants.MANGA_URL_PREFIX_2
 import eu.kanade.tachiyomi.extension.zh.copy20.Constants.apiUrl
 import eu.kanade.tachiyomi.lib.json.buildJsonParsing
+import eu.kanade.tachiyomi.lib.json.getJsonObject
 import eu.kanade.tachiyomi.lib.json.getString
 import eu.kanade.tachiyomi.lib.t2s.T2S
 import eu.kanade.tachiyomi.network.GET
@@ -328,11 +329,14 @@ class Copy20 : ConfigurableSource, HttpSource() {
             RegionFilter()
         ).apply {
             if (isRefreshGenreFailed) {
-                add(Filter.Header("获取题材失败了，已在后台重新加载"))
+                add(Filter.Header("获取题材失败了，已在后台重新获取，请点击“重置”刷新"))
                 Thread(::updateGenres).start()
             } else {
-                ::genreFilter.isInitialized || return@apply
-                add(GenreFilter())
+                if (::genreFilter.isInitialized) {
+                    add(Filter.Header("正在获取题材，请点击“重置”刷新"))
+                } else {
+                    add(GenreFilter())
+                }
             }
         }.let(::FilterList)
     }
@@ -346,7 +350,7 @@ class Copy20 : ConfigurableSource, HttpSource() {
         val rank = filters.filterIsInstance<RankFilter>().first().state
         when {
             query.isNotBlank() -> {
-                addEncodedPathSegments("api/v3/search/comic")
+                addEncodedPathSegments("api/kb/web/searchbd/comics")
                 addQueryParameter("q", query)
                 addQueryParameter("q_type", searchFilter[search].second)
             }
@@ -383,7 +387,8 @@ class Copy20 : ConfigurableSource, HttpSource() {
     override fun searchMangaParse(response: Response): MangasPage = buildJsonParsing {
         val results = Json.decodeFromStream<JsonObject>(response.body.byteStream()).jsonObject("results")
         MangasPage(
-            mangas = results.jsonArray("list").map { parseComic(it.jsonObject) },
+            mangas = results.jsonArray("list")
+                .map { parseComic(it.jsonObject.getJsonObject("comic") ?: it.jsonObject) },
             hasNextPage = results.int("offset") + results.int("limit") < results.int("total")
         )
     }
