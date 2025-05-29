@@ -333,9 +333,9 @@ class Copy20 : ConfigurableSource, HttpSource() {
                 Thread(::updateGenres).start()
             } else {
                 if (::genreFilter.isInitialized) {
-                    add(Filter.Header("正在获取题材，请点击“重置”刷新"))
-                } else {
                     add(GenreFilter())
+                } else {
+                    add(Filter.Header("正在获取题材，请点击“重置”刷新"))
                 }
             }
         }.let(::FilterList)
