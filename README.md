@@ -1,5 +1,7 @@
 # extension-source
 
+> 求求了，给个star吧
+
 ## 这是什么？
 
 [extension](https://github.com/EdgeAtZero/extensions) 的源代码
