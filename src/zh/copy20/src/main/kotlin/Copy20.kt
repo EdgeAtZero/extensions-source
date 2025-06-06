@@ -350,7 +350,7 @@ class Copy20 : ConfigurableSource, HttpSource() {
         val rank = filters.filterIsInstance<RankFilter>().first().state
         when {
             query.isNotBlank() -> {
-                addEncodedPathSegments("api/kb/web/searchbd/comics")
+                addEncodedPathSegments("api/kb/web/searchs/comics")
                 addQueryParameter("q", query)
                 addQueryParameter("q_type", searchFilter[search].second)
             }
