@@ -165,23 +165,23 @@ class Copy20 : ConfigurableSource, HttpSource() {
         Observable.fromCallable {
             buildList {
                 val isContained = onlyDefaultOppositeList.contains(manga.title)
-                val groups = if (onlyDefault && !isContained || !onlyDefault && isContained) {
-                    listOf("default")
-                } else {
+                val groups = mutableMapOf<String, String?>("default" to null)
+                if (onlyDefault && isContained || !onlyDefault && !isContained) {
                     val response = client.newCall(mangaDetailsRequest(manga)).execute()
                     buildJsonParsing {
                         Json.decodeFromStream<JsonObject>(response.body.byteStream())
                             .jsonObject("results")
                             .jsonObject("groups")
-                            .map { it.value.jsonObject.string("path_word") }
+                            .filterNot { it.key in groups }
+                            .forEach { groups += it.value.jsonObject.string("path_word") to it.value.jsonObject.string("name") }
                     }
                 }
-                for (group in groups) {
+                for ((path, name) in groups) {
                     var offset = 0
                     var loop = true
                     while (loop) {
                         val request = GET(
-                            url = "${apiUrl}/api/v3${manga.url}/group/${group}/chapters?limit=500&offset=${offset}",
+                            url = "${apiUrl}/api/v3${manga.url}/group/${path}/chapters?limit=500&offset=${offset}",
                             headers = apiHeaders
                         )
                         val response = client.newCall(request).execute()
@@ -189,7 +189,7 @@ class Copy20 : ConfigurableSource, HttpSource() {
                             val results = Json.decodeFromStream<JsonObject>(response.body.byteStream())
                                 .jsonObject("results")
                             results.jsonArray("list").forEach {
-                                add(0, parseChapter(it.jsonObject))
+                                add(0, parseChapter(it.jsonObject, name))
                                 offset++
                             }
                             loop = offset < results.int("total")
@@ -417,11 +417,12 @@ class Copy20 : ConfigurableSource, HttpSource() {
 
     private val date = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
 
-    private fun parseChapter(source: JsonObject): SChapter = buildJsonParsing {
+    private fun parseChapter(source: JsonObject, scan: String?): SChapter = buildJsonParsing {
         SChapter.create().apply {
             val comic = "${MANGA_URL_PREFIX}${source.getString("comic_path_word")}"
             url = "${comic}${CHAPTER_URL_PREFIX}${source.getString("uuid")}"
             name = source.string("name").let(t2sTransform)
+            scanlator = scan?.let(t2sTransform)
             date_upload = source.string("datetime_created").let { date.parse(it)?.time ?: 0L }
         }
     }
