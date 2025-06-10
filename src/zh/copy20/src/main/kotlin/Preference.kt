@@ -8,6 +8,11 @@ sealed class Preference<T>(
     val DEFAULT: T
 ) {
 
+    data object FetchByWeb : Preference<Boolean>(
+        "get_by_web",
+        false
+    )
+
     data object Resolution : Preference<String>(
         "resolution",
         Resolutions[0]
