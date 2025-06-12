@@ -294,7 +294,6 @@ class Copy20 : HttpSource(), ConfigurableSource {
 
     override fun getFilterList(): FilterList {
         return if (fetchByWeb) FilterList(
-            Filter.Header("点击“重置”刷新动态参数"),
             ParamFilter(
                 SEARCH_FILTER_LABEL,
                 SEARCH_FILTER.map { it.first }.toTypedArray()
