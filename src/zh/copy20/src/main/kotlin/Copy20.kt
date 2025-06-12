@@ -87,7 +87,7 @@ class Copy20 : HttpSource(), ConfigurableSource {
         preferences = application.getSharedPreferences("source_$id", Context.MODE_PRIVATE)
         updatePreferences()
         Thread(::updateParams).start()
-        preferences.registerOnSharedPreferenceChangeListener { _, _ -> updatePreferences() }
+        preferences.registerOnSharedPreferenceChangeListener { _, key -> if (!key.isNullOrBlank()) updatePreferences() }
     }
 
     private fun updatePreferences() {
@@ -164,9 +164,9 @@ class Copy20 : HttpSource(), ConfigurableSource {
         with(SwitchPreferenceCompat(screen.context)) {
             key = ""
             title = "刷新动态参数"
-            summary = "点击即可"
-            setDefaultValue(true)
-            setOnPreferenceClickListener { Thread(::updateParams).start(); true }
+            summary = "改变开关状态即可"
+            setDefaultValue(false)
+            setOnPreferenceChangeListener { _, _ -> Thread(::updateParams).start(); true }
             screen.addPreference(this)
         }
         with(SwitchPreferenceCompat(screen.context)) {
