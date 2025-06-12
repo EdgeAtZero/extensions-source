@@ -1,5 +1,4 @@
-@file:OptIn(ExperimentalSerializationApi::class)
-@file:Suppress("DuplicatedCode")
+@file:OptIn(ExperimentalAtomicApi::class, ExperimentalSerializationApi::class)
 
 package eu.kanade.tachiyomi.extension.zh.copy20
 
@@ -11,11 +10,32 @@ import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
+import app.cash.quickjs.QuickJs
 import eu.kanade.tachiyomi.extension.zh.copy20.Constants.CHAPTER_URL_PREFIX
 import eu.kanade.tachiyomi.extension.zh.copy20.Constants.CHAPTER_URL_PREFIX_2
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.GENRE_FILTER_LABEL
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.LIMIT
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.LIMIT_LARGE
 import eu.kanade.tachiyomi.extension.zh.copy20.Constants.MANGA_URL_PREFIX
 import eu.kanade.tachiyomi.extension.zh.copy20.Constants.MANGA_URL_PREFIX_2
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.RANK_FILTER
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.RANK_FILTER_LABEL
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.RANK_TYPE_FILTER
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.RANK_TYPE_FILTER_LABEL
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.RANK_WEB_FILTER
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.RANK_WEB_FILTER_LABEL
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.REGION_FILTER
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.REGION_FILTER_LABEL
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.REGION_WEB_FILTER
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.REGION_WEB_FILTER_LABEL
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.SEARCH_FILTER
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.SEARCH_FILTER_LABEL
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.SORT_FILTER
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.SORT_FILTER_LABEL
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.STATUS_FILTER
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.STATUS_FILTER_LABEL
 import eu.kanade.tachiyomi.extension.zh.copy20.Constants.apiUrl
+import eu.kanade.tachiyomi.extension.zh.copy20.Constants.offset
 import eu.kanade.tachiyomi.lib.json.buildJsonParsing
 import eu.kanade.tachiyomi.lib.json.getJsonObject
 import eu.kanade.tachiyomi.lib.json.getString
@@ -38,11 +58,12 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.properties.Delegates
 
 
 @Suppress("SameParameterValue")
-class Copy20 : ConfigurableSource, HttpSource() {
+class Copy20 : HttpSource(), ConfigurableSource {
     override val lang = "zh"
     override val supportsLatest = true
     override val name = "拷貝漫畫"
@@ -52,33 +73,33 @@ class Copy20 : ConfigurableSource, HttpSource() {
     private var fetchByWeb by Delegates.notNull<Boolean>()
     private var resolution by Delegates.notNull<String>()
     private var translate by Delegates.notNull<Boolean>()
-    private var onlyDefault by Delegates.notNull<Boolean>()
+    private var baseHeaders by Delegates.notNull<Headers>()
     private var apiHeaders by Delegates.notNull<Headers>()
     private var webHeaders by Delegates.notNull<Headers>()
+    private var dynamicParams by Delegates.notNull<DynamicParams>()
+    private var onlyDefault by Delegates.notNull<Boolean>()
     private val onlyDefaultOppositeList = mutableListOf<String>()
     private val t2sTransform: (String) -> String = { if (translate) T2S.convert(it) else it }
-
-    private var isRefreshGenreFailed = false
 
     init {
         val application = Injekt.get<Application>()
         @SuppressLint("WrongConstant")
         preferences = application.getSharedPreferences("source_$id", Context.MODE_PRIVATE)
         updatePreferences()
+        Thread(::updateParams).start()
         preferences.registerOnSharedPreferenceChangeListener { _, _ -> updatePreferences() }
-        Thread(::updateGenres).start()
     }
 
     private fun updatePreferences() {
-        fetchByWeb = preferences.getBoolean(Preference.FetchByWeb)
-        resolution = preferences.getString(Preference.Resolution)
-        translate = preferences.getBoolean(Preference.Translate)
-        onlyDefault = preferences.getBoolean(Preference.OnlyDefault)
+        fetchByWeb = preferences.getBoolean(Preferences.FetchByWeb)
+        resolution = preferences.getString(Preferences.Resolution)
+        translate = preferences.getBoolean(Preferences.Translate)
+        onlyDefault = preferences.getBoolean(Preferences.OnlyDefault)
         onlyDefaultOppositeList.clear()
-        onlyDefaultOppositeList += preferences.getString(Preference.OnlyDefaultOppositeList).trim().lines()
-        val baseHeaders = with(Headers.Builder()) {
-            add("Cookie", preferences.getString(Preference.Cookies))
-            add("User-Agent", preferences.getString(Preference.UserAgent))
+        onlyDefaultOppositeList += preferences.getString(Preferences.OnlyDefaultOppositeList).trim().lines()
+        baseHeaders = with(Headers.Builder()) {
+            add("Cookie", preferences.getString(Preferences.Cookies))
+            add("User-Agent", preferences.getString(Preferences.UserAgent))
             build()
         }
         apiHeaders = with(baseHeaders.newBuilder()) {
@@ -91,78 +112,428 @@ class Copy20 : ConfigurableSource, HttpSource() {
         }
     }
 
-    private fun updateGenres() {
-        try {
-            val request = GET(url = "${apiUrl}/api/v3/theme/comic/count?limit=500", headers = apiHeaders)
-            val response = client.newCall(request).execute()
-            genreFilter = buildJsonParsing {
-                val init = mutableListOf("全部" to "")
-                Json.decodeFromStream<JsonObject>(response.body.byteStream()).jsonObject("results").jsonArray("list")
-                    .mapTo(init) { it.jsonObject.string("name").let(t2sTransform) to it.jsonObject.string("path_word") }
-                    .toTypedArray()
-            }
-            isRefreshGenreFailed = false
-        } catch (_: Exception) {
-            isRefreshGenreFailed = true
-        }
+    private fun updateParams() {
+        dynamicParams = DynamicParams.EMPTY.copy(
+            countApi = client
+                .newCall(
+                    GET(
+                        url = "$baseUrl/search?q=Hello",
+                        headers = webHeaders
+                    )
+                )
+                .execute()
+                .body
+                .string()
+                .substringAfter("countApi = \"")
+                .substringBefore("\""),
+            genres = DynamicParams.EMPTY.genres + if (fetchByWeb) client
+                .newCall(
+                    GET(
+                        url = "$baseUrl/filter",
+                        headers = webHeaders
+                    )
+                )
+                .execute()
+                .asJsoup()
+                .select("div.screenAll-clarity-all > a")
+                .map {
+                    it.text().substringBefore('(').let(t2sTransform) to it.attr("href").substringAfterLast("theme=")
+                }
+            else client
+                .newCall(
+                    GET(
+                        url = "${apiUrl}/api/v3/theme/comic/count?limit=$LIMIT_LARGE",
+                        headers = apiHeaders
+                    )
+                )
+                .execute()
+                .let { response ->
+                    buildJsonParsing {
+                        Json.decodeFromStream<JsonObject>(response.body.byteStream())
+                            .jsonObject("results")
+                            .jsonArray("list")
+                            .map {
+                                it.jsonObject.string("name").let(t2sTransform) to it.jsonObject.string("path_word")
+                            }
+                    }
+                }
+        )
     }
-
-    override fun imageRequest(page: Page): Request = GET(
-        url = Constants.RESOLUTION_REGEX.replaceFirst(requireNotNull(page.imageUrl), resolution),
-        headers = apiHeaders
-    )
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         with(SwitchPreferenceCompat(screen.context)) {
-            key = Preference.FetchByWeb.KEY
-            title = "部分数据从网页获取"
-            summary = "当你访问手机端网页提示下载客户端时使用\n注意：获取漫画章节时会丢失上传时间"
-            setDefaultValue(Preference.FetchByWeb.DEFAULT)
+            key = ""
+            title = "刷新动态参数"
+            summary = "点击即可"
+            setDefaultValue(true)
+            setOnPreferenceClickListener { Thread(::updateParams).start(); true }
             screen.addPreference(this)
         }
         with(SwitchPreferenceCompat(screen.context)) {
-            key = Preference.Translate.KEY
+            key = Preferences.FetchByWeb.KEY
+            title = "部分数据从网页获取"
+            summary = "当你访问手机端网页提示下载客户端时使用\n注意：获取漫画章节时会丢失上传时间"
+            setDefaultValue(Preferences.FetchByWeb.DEFAULT)
+            screen.addPreference(this)
+        }
+        with(SwitchPreferenceCompat(screen.context)) {
+            key = Preferences.Translate.KEY
             title = "繁体转简体"
-            setDefaultValue(Preference.Translate.DEFAULT)
+            setDefaultValue(Preferences.Translate.DEFAULT)
             screen.addPreference(this)
         }
         with(ListPreference(screen.context)) {
-            key = Preference.Resolution.KEY
+            key = Preferences.Resolution.KEY
             title = "图片分辨率 (像素)"
             summary = "阅读过的部分需要清空缓存才能生效"
             entries = Resolutions.toTypedArray()
             entryValues = entries
-            setDefaultValue(Preference.Resolution.DEFAULT)
+            setDefaultValue(Preferences.Resolution.DEFAULT)
             screen.addPreference(this)
         }
         with(EditTextPreference(screen.context)) {
-            key = Preference.UserAgent.KEY
+            key = Preferences.UserAgent.KEY
             title = "UserAgent（需要非手机版的）"
-            setDefaultValue(Preference.UserAgent.DEFAULT)
+            setDefaultValue(Preferences.UserAgent.DEFAULT)
             screen.addPreference(this)
         }
         with(EditTextPreference(screen.context)) {
-            key = Preference.Cookies.KEY
+            key = Preferences.Cookies.KEY
             title = "Cookies"
-            setDefaultValue(Preference.Cookies.DEFAULT)
+            setDefaultValue(Preferences.Cookies.DEFAULT)
             screen.addPreference(this)
         }
         with(SwitchPreferenceCompat(screen.context)) {
-            key = Preference.OnlyDefault.KEY
+            key = Preferences.OnlyDefault.KEY
             title = "只保留默认"
             summary = "漫画章节列表只保留默认，不获取单行本等其他的"
-            setDefaultValue(Preference.OnlyDefault.DEFAULT)
+            setDefaultValue(Preferences.OnlyDefault.DEFAULT)
             screen.addPreference(this)
         }
         with(EditTextPreference(screen.context)) {
-            key = Preference.OnlyDefaultOppositeList.KEY
+            key = Preferences.OnlyDefaultOppositeList.KEY
             title = "只保留默认相反列表"
             summary =
                 "如果上面的选项开了，这个就是上面的功能的禁用列表，否则就是单独的启用列表（一行一个漫画名称，注意简繁，建议直接复制）"
-            setDefaultValue(Preference.OnlyDefaultOppositeList.DEFAULT)
+            setDefaultValue(Preferences.OnlyDefaultOppositeList.DEFAULT)
             screen.addPreference(this)
         }
     }
+
+    override fun fetchPopularManga(page: Int): Observable<MangasPage> = if (fetchByWeb) client
+        .newCall(
+            GET(
+                url = "$baseUrl/recommend?type=3200102&limit=$LIMIT&offset=${offset(page)}",
+                headers = webHeaders
+            )
+        )
+        .asObservableSuccess()
+        .map { response ->
+            val document = response.asJsoup()
+            val list = document.select("div.col-auto").map { parseComic(it) }
+            val total = document.select(".page-total")[1]!!.text().removePrefix("/").toInt()
+            MangasPage(
+                mangas = list,
+                hasNextPage = page < total
+            )
+        }
+    else client
+        .newCall(
+            GET(
+                url = "${apiUrl}/api/v3/recs?pos=3200102&limit=$LIMIT&offset=${offset(page)}",
+                headers = apiHeaders
+            )
+        )
+        .asObservableSuccess()
+        .map { response ->
+            parseJsonResponse(page, response)
+        }
+
+
+    override fun popularMangaRequest(page: Int): Request =
+        throw UnsupportedOperationException()
+
+    override fun popularMangaParse(response: Response): MangasPage =
+        throw UnsupportedOperationException()
+
+    override fun fetchLatestUpdates(page: Int): Observable<MangasPage> = if (fetchByWeb) client
+        .newCall(
+            GET(
+                url = "${baseUrl}/comics?ordering=-datetime_updated&limit=$LIMIT&offset=$${offset(page)}",
+                headers = webHeaders
+            )
+        )
+        .asObservableSuccess()
+        .map { response ->
+            parseWebResponse(page, response)
+        }
+    else client
+        .newCall(
+            GET(
+                url = "${apiUrl}/api/v3/update/newest?limit=$LIMIT&offset=${offset(page)}",
+                headers = apiHeaders
+            )
+        )
+        .asObservableSuccess()
+        .map { response ->
+            parseJsonResponse(page, response)
+        }
+
+    override fun latestUpdatesRequest(page: Int): Request =
+        throw UnsupportedOperationException()
+
+    override fun latestUpdatesParse(response: Response): MangasPage =
+        throw UnsupportedOperationException()
+
+    internal inner class ParamFilter(name: String, values: Array<String>) : Filter.Select<String>(name, values)
+
+    internal inner class SortFilter : Filter.Sort(
+        SORT_FILTER_LABEL,
+        SORT_FILTER.map { it.first }.toTypedArray()
+    )
+
+    override fun getFilterList(): FilterList {
+        return if (fetchByWeb) FilterList(
+            Filter.Header("点击“重置”刷新动态参数"),
+            ParamFilter(
+                SEARCH_FILTER_LABEL,
+                SEARCH_FILTER.map { it.first }.toTypedArray()
+            ),
+            Filter.Separator(),
+            ParamFilter(
+                RANK_WEB_FILTER_LABEL,
+                RANK_FILTER.map { it.first }.toTypedArray()
+            ),
+            ParamFilter(
+                RANK_TYPE_FILTER_LABEL,
+                RANK_TYPE_FILTER.map { it.first }.toTypedArray()
+            ),
+            Filter.Separator(),
+            SortFilter(),
+            ParamFilter(
+                REGION_WEB_FILTER_LABEL,
+                REGION_WEB_FILTER.map { it.first }.toTypedArray()
+            ),
+            ParamFilter(
+                STATUS_FILTER_LABEL,
+                STATUS_FILTER.map { it.first }.toTypedArray()
+            ),
+            ParamFilter(
+                GENRE_FILTER_LABEL,
+                dynamicParams.genres.map { it.first }.toTypedArray()
+            )
+        ) else FilterList(
+            ParamFilter(
+                SEARCH_FILTER_LABEL,
+                SEARCH_FILTER.map { it.first }.toTypedArray()
+            ),
+            Filter.Separator(),
+            ParamFilter(
+                RANK_FILTER_LABEL,
+                RANK_FILTER.map { it.first }.toTypedArray()
+            ),
+            Filter.Separator(),
+            SortFilter(),
+            ParamFilter(
+                REGION_FILTER_LABEL,
+                REGION_FILTER.map { it.first }.toTypedArray()
+            ),
+            ParamFilter(
+                GENRE_FILTER_LABEL,
+                dynamicParams.genres.map { it.first }.toTypedArray()
+            )
+        )
+    }
+
+    override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> {
+        val params = filters.filterIsInstance<ParamFilter>()
+        val rank = params.firstOrNull { it.name == RANK_FILTER_LABEL }?.state
+            ?: params.firstOrNull { it.name == RANK_WEB_FILTER_LABEL }?.state
+        val sort = filters.filterIsInstance<SortFilter>().first()
+        return when {
+            query.isNotBlank() -> fetchSearchManga(
+                page = page,
+                query = query,
+                type = SEARCH_FILTER[params.first { it.name == SEARCH_FILTER_LABEL }.state].second
+            )
+
+            rank != null && rank > 0 -> if (fetchByWeb) fetchSearchMangaByWeb(
+                rank = RANK_WEB_FILTER[rank].second,
+                type = RANK_TYPE_FILTER[params.first { it.name == RANK_TYPE_FILTER_LABEL }.state].second
+            ) else fetchSearchManga(
+                page = page,
+                rank = RANK_FILTER[rank].second
+            )
+
+            else -> if (fetchByWeb) fetchSearchMangaByWeb(
+                page = page,
+                sort = sort.state?.let { "${if (!it.ascending) "-" else ""}${SORT_FILTER[it.index].second}" },
+                region = REGION_WEB_FILTER[params.first { it.name == REGION_WEB_FILTER_LABEL }.state].second,
+                status = STATUS_FILTER[params.first { it.name == STATUS_FILTER_LABEL }.state].second,
+                theme = dynamicParams.genres[params.first { it.name == GENRE_FILTER_LABEL }.state].second
+            ) else fetchSearchManga(
+                page = page,
+                sort = sort.state?.let { "${if (!it.ascending) "-" else ""}${SORT_FILTER[it.index].second}" },
+                region = REGION_FILTER[params.first { it.name == REGION_FILTER_LABEL }.state].second,
+                theme = dynamicParams.genres[params.first { it.name == GENRE_FILTER_LABEL }.state].second
+            )
+        }
+    }
+
+    private fun fetchSearchManga(page: Int, query: String, type: String): Observable<MangasPage> = client
+        .newCall(
+            GET(
+                url = with("$baseUrl${dynamicParams.countApi}".toHttpUrl().newBuilder()) {
+                    addQueryParameter("q", query)
+                    addQueryParameter("q_type", type)
+                    addQueryParameter("limit", LIMIT.toString())
+                    addQueryParameter("offset", offset(page).toString())
+                    build()
+                },
+                headers = apiHeaders
+            )
+        )
+        .asObservableSuccess()
+        .map { response ->
+            parseJson2Response(response)
+        }
+
+    private fun fetchSearchManga(page: Int, rank: String): Observable<MangasPage> = client
+        .newCall(
+            GET(
+                url = with("$apiUrl/api/v3/ranks".toHttpUrl().newBuilder()) {
+                    addQueryParameter("type", "1")
+                    addQueryParameter("date_type", rank)
+                    addQueryParameter("limit", LIMIT.toString())
+                    addQueryParameter("offset", offset(page).toString())
+                    build()
+                },
+                headers = apiHeaders
+            )
+        )
+        .asObservableSuccess()
+        .map { response ->
+            parseJson2Response(response)
+        }
+
+    private fun fetchSearchMangaByWeb(rank: String, type: String): Observable<MangasPage> = client
+        .newCall(
+            GET(
+                url = with("$baseUrl/rank".toHttpUrl().newBuilder()) {
+                    addQueryParameter("table", rank)
+                    addQueryParameter("type", type)
+                    build()
+                },
+                headers = webHeaders
+            )
+        )
+        .asObservableSuccess()
+        .map { response ->
+            MangasPage(
+                mangas = response.asJsoup()
+                    .select("div.ranking-all-box")
+                    .map {
+                        parseComicRank(it)
+                    },
+                hasNextPage = false
+            )
+        }
+
+    private fun fetchSearchManga(page: Int, sort: String?, region: String?, theme: String?): Observable<MangasPage> =
+        client
+            .newCall(
+                GET(
+                    url = with("$apiUrl/api/v3/comics".toHttpUrl().newBuilder()) {
+                        if (sort != null) {
+                            addQueryParameter("ordering", sort)
+                        }
+                        addQueryParameter("top", region)
+                        addQueryParameter("theme", theme)
+                        addQueryParameter("limit", LIMIT.toString())
+                        addQueryParameter("offset", offset(page).toString())
+                        build()
+                    },
+                    headers = apiHeaders
+                )
+            )
+            .asObservableSuccess()
+            .map { response ->
+                parseJson2Response(response)
+            }
+
+    private fun fetchSearchMangaByWeb(
+        page: Int,
+        sort: String?,
+        region: String,
+        status: String,
+        theme: String
+    ): Observable<MangasPage> = client
+        .newCall(
+            GET(
+                url = with("$baseUrl/comics".toHttpUrl().newBuilder()) {
+                    if (sort != null) {
+                        addQueryParameter("ordering", sort)
+                    }
+                    addQueryParameter("region", region)
+                    addQueryParameter("status", status)
+                    addQueryParameter("theme", theme)
+                    addQueryParameter("limit", LIMIT.toString())
+                    addQueryParameter("offset", offset(page).toString())
+                    build()
+                },
+                headers = webHeaders
+            )
+        )
+        .asObservableSuccess()
+        .map { response ->
+            parseWebResponse(page, response)
+        }
+
+    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request =
+        throw UnsupportedOperationException()
+
+    override fun searchMangaParse(response: Response): MangasPage =
+        throw UnsupportedOperationException()
+
+    override fun getMangaUrl(manga: SManga): String =
+        "${Constants.baseUrl}${manga.url}"
+
+    override fun fetchMangaDetails(manga: SManga): Observable<SManga> =
+        if (fetchByWeb) client
+            .newCall(
+                GET(
+                    url = "$baseUrl${manga.url}",
+                    headers = webHeaders
+                )
+            )
+            .asObservableSuccess()
+            .map { response ->
+                parseComicDetail(response.asJsoup(), manga)
+            }
+        else client
+            .newCall(
+                GET(
+                    url = "${apiUrl}/api/v3${manga.url.replace(MANGA_URL_PREFIX, MANGA_URL_PREFIX_2)}",
+                    headers = apiHeaders
+                )
+            )
+            .asObservableSuccess()
+            .map { response ->
+                buildJsonParsing {
+                    Json.decodeFromStream<JsonObject>(response.body.byteStream())
+                        .jsonObject("results")
+                        .let { parseComicDetail(it.jsonObject("comic")) }
+                }
+            }
+
+    override fun mangaDetailsRequest(manga: SManga): Request =
+        throw UnsupportedOperationException()
+
+    override fun mangaDetailsParse(response: Response): SManga =
+        throw UnsupportedOperationException()
+
+    override fun getChapterUrl(chapter: SChapter): String =
+        "${Constants.baseUrl}${chapter.url}"
 
     override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> =
         if (fetchByWeb) client
@@ -211,13 +582,12 @@ class Copy20 : ConfigurableSource, HttpSource() {
                     }
                 }
                 for ((path, name) in groups) {
-                    val limit = 500
                     var offset = 0
                     var total = -1
                     var loop = true
                     while (loop) {
                         val request = GET(
-                            url = "${apiUrl}/api/v3${manga.url}/group/${path}/chapters?limit=$limit&offset=$offset",
+                            url = "${apiUrl}/api/v3${manga.url}/group/${path}/chapters?limit=$LIMIT_LARGE&offset=$offset",
                             headers = apiHeaders
                         )
                         val response = client.newCall(request).execute()
@@ -229,8 +599,8 @@ class Copy20 : ConfigurableSource, HttpSource() {
                             if (total == -1) {
                                 total = results.int("total")
                             }
-                            loop = offset + limit < total
-                            offset += limit
+                            loop = offset + LIMIT_LARGE < total
+                            offset += LIMIT_LARGE
                         }
                     }
 
@@ -243,50 +613,6 @@ class Copy20 : ConfigurableSource, HttpSource() {
 
     override fun chapterListParse(response: Response): List<SChapter> =
         throw UnsupportedOperationException()
-
-    override fun imageUrlRequest(page: Page): Request =
-        throw UnsupportedOperationException()
-
-    override fun imageUrlParse(response: Response): String =
-        throw UnsupportedOperationException()
-
-    override fun fetchMangaDetails(manga: SManga): Observable<SManga> =
-        if (fetchByWeb) client
-            .newCall(
-                GET(
-                    url = "$baseUrl${manga.url}",
-                    headers = webHeaders
-                )
-            )
-            .asObservableSuccess()
-            .map { response ->
-                parseComicDetail(response.asJsoup(), manga)
-            }
-        else client
-            .newCall(
-                GET(
-                    url = "${apiUrl}/api/v3${manga.url.replace(MANGA_URL_PREFIX, MANGA_URL_PREFIX_2)}",
-                    headers = apiHeaders
-                )
-            )
-            .asObservableSuccess()
-            .map { response ->
-                buildJsonParsing {
-                    Json.decodeFromStream<JsonObject>(response.body.byteStream())
-                        .jsonObject("results")
-                        .let { parseComicDetail(it.jsonObject("comic")) }
-                }
-            }
-
-    override fun mangaDetailsRequest(manga: SManga): Request =
-        throw UnsupportedOperationException()
-
-    override fun mangaDetailsParse(response: Response): SManga =
-        throw UnsupportedOperationException()
-
-    override fun getMangaUrl(manga: SManga): String = "${Constants.baseUrl}${manga.url}"
-
-    override fun getChapterUrl(chapter: SChapter): String = "${Constants.baseUrl}${chapter.url}"
 
     override fun fetchPageList(chapter: SChapter): Observable<List<Page>> =
         if (fetchByWeb) client
@@ -342,277 +668,61 @@ class Copy20 : ConfigurableSource, HttpSource() {
 
     override fun pageListParse(response: Response): List<Page> = throw UnsupportedOperationException()
 
-    private fun fetchMangaShared(limit: Int, offset: Int, response: Response): MangasPage =
-        buildJsonParsing {
-            val results = Json.decodeFromStream<JsonObject>(response.body.byteStream())
-                .jsonObject("results")
-            val list = results.jsonArray("list").map { parseComic(it.jsonObject.jsonObject("comic")) }
-            val total = results.int("total")
-            MangasPage(
-                mangas = list, hasNextPage = offset + limit < total
-            )
-        }
-
-    override fun fetchPopularManga(page: Int): Observable<MangasPage> =
-        if (fetchByWeb) {
-            val limit = 60
-            val offset = (page - 1) * limit
-            client
-                .newCall(
-                    GET(
-                        url = "$baseUrl/recommend?type=3200102&limit=$limit&offset=$offset",
-                        headers = webHeaders
-                    )
-                )
-                .asObservableSuccess()
-                .map { response ->
-                    val document = response.asJsoup()
-                    val list = document.select("div.col-auto").map { parseComic(it) }
-                    val total = document.select(".page-total")[1]!!.text().removePrefix("/").toInt()
-                    MangasPage(
-                        mangas = list,
-                        hasNextPage = page < total
-                    )
-                }
-        } else {
-            val limit = 30
-            val offset = (page - 1) * limit
-            client
-                .newCall(
-                    GET(
-                        url = "${apiUrl}/api/v3/recs?pos=3200102&limit=$limit&offset=$offset",
-                        headers = apiHeaders
-                    )
-                )
-                .asObservableSuccess()
-                .map { response ->
-                    fetchMangaShared(limit, offset, response)
-                }
-        }
-
-    override fun popularMangaRequest(page: Int): Request =
-        throw UnsupportedOperationException()
-
-    override fun popularMangaParse(response: Response): MangasPage =
-        throw UnsupportedOperationException()
-
-    override fun fetchLatestUpdates(page: Int): Observable<MangasPage> =
-        if (fetchByWeb) {
-            val limit = 50
-            val offset = (page - 1) * limit
-            client
-                .newCall(
-                    GET(
-                        url = "${baseUrl}/comics?ordering=-datetime_updated&limit=$limit&offset=$offset",
-                        headers = webHeaders
-                    )
-                )
-                .asObservableSuccess()
-                .map { response ->
-                    val document = response.asJsoup()
-                    val box = document.selectFirst(".exemptComic-box")!!
-                    val listRaw = box.attr("list").replace("'", "\"").replace("\\x", "\\u00")
-                    val list = Json.decodeFromString<JsonArray>(listRaw)
-                        .map { parseComic(it.jsonObject) }
-                    val total = box.attr("total").toInt()
-                    MangasPage(
-                        mangas = list,
-                        hasNextPage = offset + limit < total
-                    )
-                }
-        } else {
-            val limit = 30
-            val offset = (page - 1) * limit
-            client
-                .newCall(
-                    GET(
-                        url = "${apiUrl}/api/v3/update/newest?limit=$limit&offset=$offset",
-                        headers = apiHeaders
-                    )
-                )
-                .asObservableSuccess()
-                .map { response ->
-                    fetchMangaShared(limit, offset, response)
-                }
-        }
-
-    override fun latestUpdatesRequest(page: Int): Request =
-        throw UnsupportedOperationException()
-
-    override fun latestUpdatesParse(response: Response): MangasPage =
-        throw UnsupportedOperationException()
-
-    private val searchFilter = arrayOf(
-        "全部" to "", "名称" to "name", "作者" to "author", "汉化组" to "local"
-    )
-
-    private val rankFilter = arrayOf(
-        "不查看" to "",
-        "日榜(上升最快)" to "day",
-        "周榜(最近7天)" to "week",
-        "月榜(最近30天)" to "month",
-        "总榜单(即热门排序)" to "total"
-    )
-
-    private val sortFilter = arrayOf(
-        "热门" to "popular", "更新时间" to "datetime_updated"
-    )
-
-    private val regionFilter = arrayOf(
-        "全部" to "", "日本" to "japan", "韩国" to "korea", "欧美" to "west", "已完结" to "finish"
-    )
-
-    private lateinit var genreFilter: Array<Pair<String, String>>
-
-    internal inner class SearchFilter : Filter.Select<String>(
-        name = "文本搜索范围", values = searchFilter.map { it.first }.toTypedArray()
-    )
-
-    internal inner class RankFilter : Filter.Select<String>(
-        name = "排行榜", values = rankFilter.map { it.first }.toTypedArray()
-    )
-
-    internal inner class SortFilter : Filter.Sort(
-        name = "排序", values = sortFilter.map { it.first }.toTypedArray()
-    )
-
-    internal inner class RegionFilter : Filter.Select<String>(
-        name = "地区/状态", values = regionFilter.map { it.first }.toTypedArray()
-    )
-
-    internal inner class GenreFilter : Filter.Select<String>(
-        name = "题材", values = genreFilter.map { it.first }.toTypedArray()
-    )
-
-    override fun getFilterList(): FilterList {
-        return mutableListOf(
-            SearchFilter(),
-            Filter.Separator(),
-            RankFilter(),
-            Filter.Separator(),
-            Filter.Header(name = "分类（搜索文本、查看排行榜时无效）"),
-            SortFilter(),
-            RegionFilter()
-        ).apply {
-            if (isRefreshGenreFailed) {
-                add(Filter.Header("获取题材失败了，已在后台重新获取，请点击“重置”刷新"))
-                Thread(::updateGenres).start()
-            } else {
-                if (::genreFilter.isInitialized) {
-                    add(GenreFilter())
-                } else {
-                    add(Filter.Header("正在获取题材，请点击“重置”刷新"))
-                }
-            }
-        }.let(::FilterList)
+    override fun fetchImageUrl(page: Page): Observable<String> = Observable.fromCallable {
+        checkNotNull(page.imageUrl)
     }
 
-    override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> {
-        val search = filters.filterIsInstance<SearchFilter>().first().state
-        val rank = filters.filterIsInstance<RankFilter>().first().state
-        return when {
-            query.isNotBlank() -> fetchSearchManga(
-                page = page,
-                query = query,
-                type = searchFilter[search].second
-            )
+    override fun imageUrlRequest(page: Page): Request =
+        throw UnsupportedOperationException()
 
-            rank > 0 -> fetchSearchManga(
-                page = page,
-                rank = rankFilter[rank].second
-            )
+    override fun imageUrlParse(response: Response): String =
+        throw UnsupportedOperationException()
 
-            else -> fetchSearchManga(
-                page = page,
-                sort = filters.filterIsInstance<SortFilter>()
-                    .first()
-                    .state
-                    ?.let { "${if (!it.ascending) "-" else ""}${sortFilter[it.index].second}" },
-                region = regionFilter[filters.filterIsInstance<RegionFilter>().first().state].second,
-                theme = genreFilter[filters.filterIsInstance<GenreFilter>().first().state].second
-            )
-        }
+    override fun imageRequest(page: Page): Request = GET(
+        url = Constants.RESOLUTION_REGEX.replaceFirst(requireNotNull(page.imageUrl), resolution),
+        headers = baseHeaders
+    )
+
+    private fun parseJsonResponse(page: Int, response: Response): MangasPage = buildJsonParsing {
+        val results = Json.decodeFromStream<JsonObject>(response.body.byteStream())
+            .jsonObject("results")
+        val list = results.jsonArray("list").map { parseComic(it.jsonObject.jsonObject("comic")) }
+        val total = results.int("total")
+        MangasPage(
+            mangas = list, hasNextPage = page * LIMIT < total
+        )
     }
 
-    private fun fetchSearchMangaShared(response: Response): MangasPage =
-        buildJsonParsing {
-            val results = Json.decodeFromStream<JsonObject>(response.body.byteStream())
-                .jsonObject("results")
-            MangasPage(
-                mangas = results.jsonArray("list")
-                    .map { parseComic(it.jsonObject.getJsonObject("comic") ?: it.jsonObject) },
-                hasNextPage = results.int("offset") + results.int("limit") < results.int("total")
-            )
+    private fun parseJson2Response(response: Response): MangasPage = buildJsonParsing {
+        val results = Json.decodeFromStream<JsonObject>(response.body.byteStream())
+            .jsonObject("results")
+        MangasPage(
+            mangas = results.jsonArray("list")
+                .map { parseComic(it.jsonObject.getJsonObject("comic") ?: it.jsonObject) },
+            hasNextPage = results.int("offset") + results.int("limit") < results.int("total")
+        )
+    }
+
+    private fun parseWebResponse(page: Int, response: Response): MangasPage {
+        val document = response.asJsoup()
+        val box = document.selectFirst(".exemptComic-box")!!
+        val list = Json.decodeFromString<JsonArray>(jsObjectToJson(box.attr("list")))
+            .map { parseComic(it.jsonObject) }
+        val total = box.attr("total").toInt()
+        return MangasPage(
+            mangas = list,
+            hasNextPage = page * LIMIT < total
+        )
+    }
+
+    private fun jsObjectToJson(source: String): String {
+        val context = QuickJs.create()
+        try {
+            return context.evaluate("JSON.stringify($source);") as String
+        } finally {
+            context.close()
         }
-
-    private fun fetchSearchManga(page: Int, query: String, type: String): Observable<MangasPage> =
-        client
-            .newCall(
-                GET(
-                    url = with(apiUrl.toHttpUrl().newBuilder()) {
-                        addEncodedPathSegments("api/kb/web/searchba/comics")
-                        addQueryParameter("q", query)
-                        addQueryParameter("q_type", type)
-                        addQueryParameter("limit", "30")
-                        addQueryParameter("offset", ((page - 1) * 30).toString())
-                        build()
-                    },
-                    headers = apiHeaders
-                )
-            )
-            .asObservableSuccess()
-            .map { response ->
-                fetchSearchMangaShared(response)
-            }
-
-    private fun fetchSearchManga(page: Int, rank: String): Observable<MangasPage> =
-        client
-            .newCall(
-                GET(
-                    url = with(apiUrl.toHttpUrl().newBuilder()) {
-                        addEncodedPathSegments("api/v3/ranks")
-                        addQueryParameter("type", "1")
-                        addQueryParameter("date_type", rank)
-                        addQueryParameter("limit", "30")
-                        addQueryParameter("offset", ((page - 1) * 30).toString())
-                        build()
-                    },
-                    headers = apiHeaders
-                )
-            )
-            .asObservableSuccess()
-            .map { response ->
-                fetchSearchMangaShared(response)
-            }
-
-    private fun fetchSearchManga(page: Int, sort: String?, region: String?, theme: String?): Observable<MangasPage> =
-        client
-            .newCall(
-                GET(
-                    url = with(apiUrl.toHttpUrl().newBuilder()) {
-                        addEncodedPathSegments("api/v3/comics")
-                        if (sort != null) {
-                            addQueryParameter("ordering", sort)
-                        }
-                        addQueryParameter("top", region)
-                        addQueryParameter("theme", theme)
-                        addQueryParameter("limit", "30")
-                        addQueryParameter("offset", ((page - 1) * 30).toString())
-                        build()
-                    },
-                    headers = apiHeaders
-                )
-            )
-            .asObservableSuccess()
-            .map { response ->
-                fetchSearchMangaShared(response)
-            }
-
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request =
-        throw UnsupportedOperationException()
-
-    override fun searchMangaParse(response: Response): MangasPage =
-        throw UnsupportedOperationException()
+    }
 
     private fun parseComic(source: JsonObject): SManga = buildJsonParsing {
         SManga.create().apply {
@@ -628,6 +738,14 @@ class Copy20 : ConfigurableSource, HttpSource() {
         url = box.selectFirst("a")!!.attr("href")
         title = box.selectFirst("p")!!.text().let(t2sTransform)
         author = source.select("span.exemptComicItem-txt-span > a").joinToString { it.text().let(t2sTransform) }
+        thumbnail_url = source.selectFirst("img")!!.attr("data-src")
+    }
+
+    private fun parseComicRank(source: Element): SManga = SManga.create().apply {
+        val box = source.selectFirst("div.ranking-all-topThree-txt")!!
+        url = source.selectFirst("a")!!.attr("href")
+        title = box.selectFirst("a > p")!!.text().let(t2sTransform)
+        author = box.select("span > a").joinToString { it.text().let(t2sTransform) }
         thumbnail_url = source.selectFirst("img")!!.attr("data-src")
     }
 

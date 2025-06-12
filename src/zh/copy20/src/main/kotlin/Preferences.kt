@@ -3,53 +3,53 @@ package eu.kanade.tachiyomi.extension.zh.copy20
 import android.content.SharedPreferences
 
 @Suppress("PropertyName")
-sealed class Preference<T>(
+sealed class Preferences<T>(
     val KEY: String,
     val DEFAULT: T
 ) {
 
-    data object FetchByWeb : Preference<Boolean>(
+    data object FetchByWeb : Preferences<Boolean>(
         "get_by_web",
         false
     )
 
-    data object Resolution : Preference<String>(
+    data object Resolution : Preferences<String>(
         "resolution",
         Resolutions[0]
     )
 
-    data object Translate : Preference<Boolean>(
+    data object Translate : Preferences<Boolean>(
         "translate",
         true
     )
 
-    data object OnlyDefault : Preference<Boolean>(
+    data object OnlyDefault : Preferences<Boolean>(
         "only_default",
         false
     )
 
-    data object OnlyDefaultOppositeList : Preference<String>(
+    data object OnlyDefaultOppositeList : Preferences<String>(
         "only_default_opposite_list",
         ""
     )
 
-    data object UserAgent : Preference<String>(
+    data object UserAgent : Preferences<String>(
         "user_agent",
         Constants.DEFAULT_USER_AGENT
     )
 
-    data object Cookies : Preference<String>(
+    data object Cookies : Preferences<String>(
         "cookies",
         ""
     )
 
 }
 
-fun SharedPreferences.getBoolean(preference: Preference<Boolean>): Boolean =
+fun SharedPreferences.getBoolean(preference: Preferences<Boolean>): Boolean =
     getBoolean(preference.KEY, preference.DEFAULT)!!
 
-fun SharedPreferences.getString(preference: Preference<String>): String =
+fun SharedPreferences.getString(preference: Preferences<String>): String =
     getString(preference.KEY, preference.DEFAULT)!!
 
-fun SharedPreferences.getStringSet(preference: Preference<Set<String>>): Set<String> =
+fun SharedPreferences.getStringSet(preference: Preferences<Set<String>>): Set<String> =
     getStringSet(preference.KEY, preference.DEFAULT)!!
