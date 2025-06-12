@@ -87,7 +87,7 @@ class Copy20 : HttpSource(), ConfigurableSource {
         preferences = application.getSharedPreferences("source_$id", Context.MODE_PRIVATE)
         updatePreferences()
         Thread(::updateParams).start()
-        preferences.registerOnSharedPreferenceChangeListener { _, key -> if (!key.isNullOrBlank()) updatePreferences() }
+        preferences.registerOnSharedPreferenceChangeListener { _, _ -> updatePreferences() }
     }
 
     private fun updatePreferences() {
