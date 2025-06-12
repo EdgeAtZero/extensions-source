@@ -172,7 +172,7 @@ class Copy20 : HttpSource(), ConfigurableSource {
         with(SwitchPreferenceCompat(screen.context)) {
             key = Preferences.FetchByWeb.KEY
             title = "部分数据从网页获取"
-            summary = "当你访问手机端网页提示下载客户端时使用\n注意：获取漫画章节时会丢失上传时间"
+            summary = "当你访问手机端网页提示下载客户端时使用\n注意：获取漫画章节时会丢失上传时间，排行榜看不了全部"
             setDefaultValue(Preferences.FetchByWeb.DEFAULT)
             screen.addPreference(this)
         }
@@ -214,7 +214,7 @@ class Copy20 : HttpSource(), ConfigurableSource {
             key = Preferences.OnlyDefaultOppositeList.KEY
             title = "只保留默认相反列表"
             summary =
-                "如果上面的选项开了，这个就是上面的功能的禁用列表，否则就是单独的启用列表（一行一个漫画名称，注意简繁，建议直接复制）"
+                "如果上面的选项开了，这个就是上面的功能的禁用列表，否则就是单独的启用列表\n注意：一行一个漫画名称，注意简繁，建议直接复制"
             setDefaultValue(Preferences.OnlyDefaultOppositeList.DEFAULT)
             screen.addPreference(this)
         }
